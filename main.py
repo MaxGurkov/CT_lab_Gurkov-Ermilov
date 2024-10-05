@@ -60,6 +60,7 @@ def join_matrix(matrix):
     result_matrix = np.zeros((X.shape[0] + X.shape[1], X.shape[1]), dtype=int)
     lead_idxs = get_lead_indexes(matrix)
     x_idx, i_idx = 0, 0
+
     for idx in range(result_matrix.shape[0]):
         if idx in lead_idxs:
             result_matrix[idx] = X[x_idx]
@@ -70,8 +71,8 @@ def join_matrix(matrix):
     return result_matrix
 
 
-def generate_code_words(matrix):
-    """Формирование кодовых слов длины n"""
+def generate_code_words_from_vectors(matrix):
+    """Формирование кодовых слов через сложение слов из порождающего множества"""
     row, col = matrix.shape
     words = []
     for i in range(1, 2 ** row):
@@ -82,30 +83,55 @@ def generate_code_words(matrix):
     return unique_words
 
 
+def generate_code_words_from_binary(matrix):
+    """Формирование кодовых слов через двоичные слова длины k"""
+    row, col = matrix.shape
+    words = []
+    for i in range(2 ** row):
+        binary_word = np.array([int(x) for x in format(i, f'0{row}b')])
+        word = np.dot(binary_word, matrix) % 2
+        words.append(word)
+    return np.array(words)
+
+
 def check_code_word(matrix, H):
     """Проверка умножения кодовых слов на H"""
-    code_words = generate_code_words(matrix)
+    code_words = generate_code_words_from_vectors(matrix)
+    check_results = []
     for word in code_words:
-        if not np.all(np.dot(word, H) % 2 == 0):
-            return False
-    return True
+        result = np.dot(word, H) % 2
+        check_results.append(result)
+        if not np.all(result == 0):
+            return False, check_results
+    return True, check_results
 
 
 def code_distance(matrix):
     """Вычисление кодового расстояния"""
-    code_words = generate_code_words(matrix)
+    code_words = generate_code_words_from_vectors(matrix)
     min_weight = min([np.sum(word) for word in code_words if np.sum(word) > 0])
     return min_weight
 
 
 def error_detection(matrix, H, t):
     """Внесение ошибки кратности t и проверка обнаружения"""
-    code_words = generate_code_words(matrix)
+    code_words = generate_code_words_from_vectors(matrix)
     word = code_words[0]
     error_vector = np.zeros(word.shape, dtype=int)
     error_vector[:t] = 1  # Вносим ошибку в t первых битов
     error_word = (word + error_vector) % 2
-    return np.dot(error_word, H) % 2  # Должно вернуть ненулевой вектор
+    return word, error_vector, error_word, np.dot(error_word, H) % 2
+
+
+def undetected_error(matrix, H, t_plus_one):
+    """Ошибка кратности t+1, которая не обнаруживается"""
+    code_words = generate_code_words_from_vectors(matrix)
+    word = code_words[0]
+    error_vector = np.zeros(word.shape, dtype=int)
+    error_vector[:t_plus_one] = 1  # Вносим ошибку кратности t+1
+    error_word = (word + error_vector) % 2
+    undetected = np.dot(error_word, H) % 2  # Должно вернуть вектор нулей
+    return word, error_vector, error_word, undetected
 
 
 class LinearCode:
@@ -129,20 +155,45 @@ class LinearCode:
         n, k = self.G_star.shape[1], self.G_star.shape[0]
         print(f"Число столбцов (n) = {n}, Число строк (k) = {k}")
 
-        # Задание 1.3.3
-        print("1.3.3. Проверочная матрица H:\n", self.H)
+        # Задание 1.3.3 - Проверочная матрица H уже выведена
+        print("1.3.3. Проверочная матрица H выведена\n", self.H)
 
         # Задание 1.4.1
-        code_words = generate_code_words(self.G_star)
-        print("1.4.1. Кодовые слова длины n:\n", code_words)
+        code_words_vectors = generate_code_words_from_vectors(self.G_star)
+        print("1.4.1. Кодовые слова через сложение:\n", code_words_vectors)
 
         # Задание 1.4.2
-        check = check_code_word(self.G_star, self.H)
-        print(f"1.4.2. Результат проверки кодовых слов (все нули): {'Да' if check else 'Нет'}")
+        code_words_binary = generate_code_words_from_binary(self.G_star)
+        print("1.4.2. Кодовые слова через двоичные слова:\n", code_words_binary)
+        check = np.array_equal(code_words_vectors, code_words_binary)
+        print(f"Совпадение кодовых слов (1.4.1 и 1.4.2): {'Да' if check else 'Нет'}")
 
-        # Задание 1.5
-        distance = code_distance(self.G_star)
-        print(f"1.5. Кодовое расстояние: {distance}")
+        # Проверка кодовых слов на проверочной матрице H
+        all_zero, check_results = check_code_word(self.G_star, self.H)
+
+        print(f"\nПроверка кодовых слов на H :")
+        for idx, result in enumerate(check_results):
+            print(f"v[{idx}]@H = {result}")
+
+        print(f"\nВсе результаты умножения на H — нулевые вектора: {'Да' if all_zero else 'Нет'}")
+
+        # Вычисление кодового расстояния и кратности ошибки t
+        d = code_distance(self.G_star)
+        t = (d - 1) // 2
+        print(f"\nКодовое расстояние: {d}")
+        print(f"Кратность обнаруживаемой ошибки t: {t}")
+
+        # Внесение ошибки кратности <= t
+        word, e1, v_plus_e1, v_H = error_detection(self.G_star, self.H, t)
+        print(f"\ne1 = {e1}")
+        print(f"v + e1 = {v_plus_e1}")
+        print(f"(v + e1)@H = {v_H} – error")
+
+        # Ошибка кратности t+1
+        word, e2, v_plus_e2, undetected = undetected_error(self.G_star, self.H, t + 1)
+        print(f"\ne2 = {e2}")
+        print(f"v + e2 = {v_plus_e2}")
+        print(f"(v + e2)@H = {undetected} – no error")
 
 # Создание экземпляра класса
 linear_code = LinearCode(S)
