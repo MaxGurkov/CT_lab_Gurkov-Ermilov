@@ -1,1 +1,1 @@
-# CT_lab1_Gurkov-Ermilov
+# CT_labs_Gurkov-Ermilov
